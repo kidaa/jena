@@ -40,6 +40,7 @@ import org.apache.jena.sparql.syntax.Element ;
 import org.apache.jena.sparql.syntax.PatternVars ;
 import org.apache.jena.sparql.syntax.Template ;
 import org.apache.jena.sparql.util.FmtUtils ;
+import org.apache.jena.system.JenaSystem ;
 
 /** The data structure for a query as presented externally.
  *  There are two ways of creating a query - use the parser to turn
@@ -54,7 +55,7 @@ import org.apache.jena.sparql.util.FmtUtils ;
 
 public class Query extends Prologue implements Cloneable, Printable
 {
-    static { ARQ.init() ; /* Ensure everything has started properly */ }
+    static { JenaSystem.init() ; /* Ensure everything has started properly */ }
     
     public static final int QueryTypeUnknown    = -123 ;
     public static final int QueryTypeSelect     = 111 ;
@@ -146,7 +147,8 @@ public class Query extends Prologue implements Cloneable, Printable
     public boolean isAskType()                  { return queryType == QueryTypeAsk ; }
 
     public boolean isUnknownType()              { return queryType == QueryTypeUnknown ; }
-
+    
+    public boolean isConstructQuad()            { return isConstructType() && constructTemplate.containsRealQuad() ; }
     // It was a mistake to extend Prologue ... but what is done is done.
     public Prologue getPrologue()               { return this ; }
     

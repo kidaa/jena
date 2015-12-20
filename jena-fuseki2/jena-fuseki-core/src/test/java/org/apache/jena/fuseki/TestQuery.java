@@ -23,17 +23,24 @@ import static org.apache.jena.fuseki.ServerTest.gn2 ;
 import static org.apache.jena.fuseki.ServerTest.model1 ;
 import static org.apache.jena.fuseki.ServerTest.model2 ;
 import static org.apache.jena.fuseki.ServerTest.serviceQuery ;
-import static org.apache.jena.fuseki.ServerTest.serviceREST ;
+import static org.apache.jena.fuseki.ServerTest.serviceGSP ;
 
 import java.io.IOException ;
 import java.net.HttpURLConnection ;
 import java.net.URL ;
+import java.util.Iterator ;
 
 import org.apache.jena.atlas.junit.BaseTest ;
+import org.apache.jena.atlas.web.AcceptList ;
+import org.apache.jena.atlas.web.MediaType;
 import org.apache.jena.graph.Node ;
+import org.apache.jena.graph.Triple ;
 import org.apache.jena.query.* ;
+import org.apache.jena.rdf.model.Model ;
+import org.apache.jena.sparql.core.Quad ;
 import org.apache.jena.sparql.core.Var ;
 import org.apache.jena.sparql.engine.binding.Binding ;
+import org.apache.jena.sparql.engine.http.QueryEngineHTTP ;
 import org.apache.jena.sparql.resultset.ResultSetCompare ;
 import org.apache.jena.sparql.sse.Item ;
 import org.apache.jena.sparql.sse.SSE ;
@@ -54,15 +61,14 @@ public class TestQuery extends BaseTest {
     @BeforeClass
     public static void beforeClass() {
         ServerTest.allocServer() ;
-        ServerTest.resetServer() ;
-        DatasetAccessor du = DatasetAccessorFactory.createHTTP(serviceREST) ;
+        DatasetAccessor du = DatasetAccessorFactory.createHTTP(serviceGSP) ;
         du.putModel(model1) ;
         du.putModel(gn1, model2) ;
     }
 
     @AfterClass
     public static void afterClass() {
-        DatasetAccessor du = DatasetAccessorFactory.createHTTP(serviceREST) ;
+        DatasetAccessor du = DatasetAccessorFactory.createHTTP(serviceGSP) ;
         du.deleteDefault() ;
         ServerTest.freeServer() ;
     }
@@ -104,7 +110,7 @@ public class TestQuery extends BaseTest {
 
     @Test
     public void query_dynamic_dataset_01() {
-        DatasetAccessor du = DatasetAccessorFactory.createHTTP(serviceREST) ;
+        DatasetAccessor du = DatasetAccessorFactory.createHTTP(serviceGSP) ;
         du.putModel(model1);
         du.putModel(gn1, model2);
         {
@@ -117,7 +123,6 @@ public class TestQuery extends BaseTest {
             }
         }
         {
-
             String query = "SELECT * FROM <" + gn1 + "> { ?s ?p ?o }" ;
             try (QueryExecution qExec = QueryExecutionFactory.sparqlService(serviceQuery + "?output=json", query)) {
                 ResultSet rs = qExec.execSelect() ;
@@ -127,10 +132,10 @@ public class TestQuery extends BaseTest {
             }
         }
     }
-    
+
     @Test
     public void query_dynamic_dataset_02() {
-        DatasetAccessor du = DatasetAccessorFactory.createHTTP(serviceREST) ;
+        DatasetAccessor du = DatasetAccessorFactory.createHTTP(serviceGSP) ;
         du.putModel(model1);
         du.putModel(gn1, model1);
         du.putModel(gn2, model2);
@@ -141,6 +146,121 @@ public class TestQuery extends BaseTest {
             assertEquals(2, n) ;
         }
     }
+
+    @Test
+    public void query_construct_quad_01()
+    {
+        String queryString = " CONSTRUCT { GRAPH <http://eg/g> {?s ?p ?oq} } WHERE {?s ?p ?oq}" ;
+        Query query = QueryFactory.create(queryString, Syntax.syntaxARQ);
+
+        try ( QueryExecution qExec = QueryExecutionFactory.sparqlService(serviceQuery, query) ) {
+            Iterator<Quad> result = qExec.execConstructQuads();
+            Assert.assertTrue(result.hasNext());
+            Assert.assertEquals( "http://eg/g", result.next().getGraph().getURI());
+
+        }
+    }
+
+    @Test
+    public void query_construct_quad_02()
+    {
+        String queryString = " CONSTRUCT { GRAPH <http://eg/g> {?s ?p ?oq} } WHERE {?s ?p ?oq}" ;
+        Query query = QueryFactory.create(queryString, Syntax.syntaxARQ);
+
+        try ( QueryExecution qExec = QueryExecutionFactory.sparqlService(serviceQuery, query) ) {
+            Dataset result = qExec.execConstructDataset();
+            Assert.assertTrue(result.asDatasetGraph().find().hasNext());
+            Assert.assertEquals( "http://eg/g", result.asDatasetGraph().find().next().getGraph().getURI());
+        }
+    }
+
+    @Test
+    public void query_construct_01()
+    {
+        String query = " CONSTRUCT {?s ?p ?o} WHERE {?s ?p ?o}" ;
+        try ( QueryExecution qExec = QueryExecutionFactory.sparqlService(serviceQuery, query) ) {
+            Iterator<Triple> result = qExec.execConstructTriples();
+            Assert.assertTrue(result.hasNext());
+        }
+    }
+
+    @Test
+    public void query_construct_02()
+    {
+        String query = " CONSTRUCT {?s ?p ?o} WHERE {?s ?p ?o}" ;
+        try ( QueryExecution qExec = QueryExecutionFactory.sparqlService(serviceQuery, query) ) {
+            Model result = qExec.execConstruct();
+            assertEquals(1, result.size());
+        }
+    }
+
+    @Test
+    public void query_describe_01() {
+        String query = "DESCRIBE ?s WHERE {?s ?p ?o}" ;
+        try ( QueryExecution qExec = QueryExecutionFactory.sparqlService(serviceQuery, query) ) {
+            Model result = qExec.execDescribe();
+            assertFalse(result.isEmpty()) ;
+        }
+    }
+
+    @Test
+    public void query_describe_02() {
+        String query = "DESCRIBE <http://example/somethingelse> WHERE { }" ;
+        try ( QueryExecution qExec = QueryExecutionFactory.sparqlService(serviceQuery, query) ) {
+            Model result = qExec.execDescribe();
+            assertTrue(result.isEmpty()) ;
+        }
+    }
+
+    private static final AcceptList rdfOfferTest = DEF.rdfOffer ;
+    private static final AcceptList quadsOfferTest = DEF.quadsOffer ;
+
+    @Test
+    public void query_construct_conneg() {
+        String query = " CONSTRUCT {?s ?p ?o} WHERE {?s ?p ?o}" ;
+        for (MediaType type: rdfOfferTest.entries()){
+            String contentType = type.toHeaderString();
+            try ( QueryEngineHTTP qExec = (QueryEngineHTTP) QueryExecutionFactory.sparqlService(serviceQuery, query) ) {
+                qExec.setModelContentType( contentType );
+                Iterator<Triple> iter = qExec.execConstructTriples();
+                assertTrue(iter.hasNext()) ;
+                String x = qExec.getHttpResponseContentType() ;
+                assertEquals( contentType , x ) ;
+            }
+        }
+    }
+
+    @Test
+    public void query_construct_quad_conneg() {
+        String queryString = " CONSTRUCT { GRAPH ?g {?s ?p ?o} } WHERE { GRAPH ?g {?s ?p ?o}}" ;
+        Query query = QueryFactory.create(queryString, Syntax.syntaxARQ);
+        for (MediaType type: quadsOfferTest.entries()){
+            String contentType = type.toHeaderString();
+            try ( QueryEngineHTTP qExec = (QueryEngineHTTP) QueryExecutionFactory.sparqlService(serviceQuery, query) ) {
+                qExec.setDatasetContentType( contentType );
+                Iterator<Quad> iter = qExec.execConstructQuads();
+                assertTrue(iter.hasNext()) ;
+                String x = qExec.getHttpResponseContentType() ;
+                assertEquals( contentType , x ) ;
+            }
+        }
+    }
+
+    @Test
+    public void query_describe_conneg() {
+        String query = "DESCRIBE ?s WHERE {?s ?p ?o}" ;
+        for (MediaType type: rdfOfferTest.entries()){
+            String contentType = type.toHeaderString();
+            try ( QueryEngineHTTP qExec = (QueryEngineHTTP) QueryExecutionFactory.sparqlService(serviceQuery, query) ) {
+                qExec.setModelContentType( contentType );
+                Model m = qExec.execDescribe() ;
+                String x = qExec.getHttpResponseContentType() ;
+                assertEquals( contentType , x ) ;
+                assertFalse(m.isEmpty()) ;
+            }
+        }
+    }
+
 
     private void execQuery(String queryString, int exceptedRowCount) {
         QueryExecution qExec = QueryExecutionFactory.sparqlService(serviceQuery, queryString) ;

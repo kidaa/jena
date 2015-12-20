@@ -93,6 +93,9 @@ import org.apache.jena.sparql.expr.aggregate.* ;
 import org.apache.jena.update.* ;
 import org.apache.jena.sparql.modify.request.* ;
 #endif
+#ifdef ARQ
+import org.apache.jena.sparql.core.Quad ;
+#endif
 
 public class CLASS extends PARSERBASE
 {
@@ -233,19 +236,42 @@ void SelectClause() : {  Var v ; Expr expr ; Node n ; }
 #include  "json-extra.jj"
 #endif
 
+#ifdef ARQ
+void ConstructQuery() : { Template t ; 
+                          QuadAcc acc = new QuadAcc() ; }
+{
+ <CONSTRUCT>
+   { getQuery().setQueryConstructType() ; }
+ (
+    // Full form.
+    t = ConstructTemplate() 
+      { getQuery().setConstructTemplate(t) ; }
+    ( DatasetClause() )*
+    WhereClause()
+    SolutionModifier()
+ |
+    // Abbreviated CONSTRUCT WHERE {}
+    ( DatasetClause() )*
+    <WHERE>
+    // Should have been "ConstructTemplate()"
+    <LBRACE>  
+    ConstructQuads(acc)
+    <RBRACE>
+    SolutionModifier()
+    { 
+      t = new Template(acc) ;
+      getQuery().setConstructTemplate(t) ;
+      // Create a query in the same shape as the query created by writing out in full.
+	  ElementGroup elg = createQueryPattern(t);
+      getQuery().setQueryPattern(elg) ;
+    }
+ )
+}
+#else
+// Complete compatibility - this differs from the above at "new Template"
 void ConstructQuery() : { Template t ; 
                           TripleCollectorBGP acc = new TripleCollectorBGP() ; }
 {
-// #ifndef ARQ
-//   <CONSTRUCT>
-//      { getQuery().setQueryConstructType() ; }
-//   t = ConstructTemplate() 
-//     { getQuery().setConstructTemplate(t) ; }
-//   ( DatasetClause() )*
-//   WhereClause()
-//   SolutionModifier()
-// #else
-
  <CONSTRUCT>
    { getQuery().setQueryConstructType() ; }
  (
@@ -274,8 +300,8 @@ void ConstructQuery() : { Template t ;
       getQuery().setQueryPattern(elg) ;
     }
  )
-//#endif
 }
+#endif
 
 void DescribeQuery() : { Node n ; }
 {
@@ -700,8 +726,37 @@ void QuadsNotTriples(QuadAccSink acc) : {Node gn ; Node prev = acc.getGraph() ; 
     (TriplesTemplate(acc))?
     <RBRACE>
     { setAccGraph(acc, prev) ; }
-    
 }
+#ifdef ARQ
+// See "/* TriG template :: ..... */" below.
+// If not TriG like, check this is not "QuadPattern" 
+void ConstructQuads(QuadAcc acc) : {}
+{
+    (/* TriG template: LOOKAHEAD(2) */TriplesTemplate(acc))?
+    (
+       ConstructQuadsNotTriples(acc)
+       (<DOT>)?
+       (/* TriG template: LOOKAHEAD(2) */TriplesTemplate(acc))?
+    )*    
+}
+
+void ConstructQuadsNotTriples(QuadAccSink acc) :
+     { Node gn = Quad.defaultGraphNodeGenerated ;
+       Node prev = acc.getGraph() ;
+     }
+{
+    (
+   	  <GRAPH> /* TriG template :: (<GRAPH>)?*/
+      gn = VarOrBlankNodeOrIri()
+    )?
+
+    { setAccGraph(acc, gn) ; }
+    <LBRACE> 
+    (TriplesTemplate(acc))?
+    <RBRACE>
+    { setAccGraph(acc, prev) ; }
+}
+#endif
 
 void TriplesTemplate(TripleCollector acc) : { }
 {    // same as ConstructTriples
@@ -1012,7 +1067,7 @@ Expr FunctionCall() : { String fname ; ExprList a ; }
          // aggregates
          if ( ! allowAggregatesInExpressions )
             throwParseException("Aggregate expression not legal at this point : "+fname, -1, -1) ;
-         Aggregator agg = AggregatorFactory.createCustom(fname, a) ;
+         Aggregator agg = AggregatorFactory.createCustom(true, false, fname, a) ;
          Expr exprAgg = getQuery().allocAggregate(agg) ;
          return exprAgg ;
      }
@@ -1058,6 +1113,18 @@ ExprList ExpressionList() : { Expr expr = null ; ExprList args = new ExprList() 
 
 
 // -------- Construct patterns
+#ifdef ARQ
+Template ConstructTemplate() : { QuadAcc acc = new QuadAcc() ;
+                                 Template t = new Template (acc);}
+{
+    { setInConstructTemplate(true) ; }
+  <LBRACE> 
+    ConstructQuads(acc)
+  <RBRACE>
+    { setInConstructTemplate(false) ;
+      return t ; }
+}
+#else
 
 Template ConstructTemplate() : { TripleCollectorBGP acc = new TripleCollectorBGP(); 
                                  Template t = new Template(acc.getBGP()) ; }
@@ -1069,6 +1136,7 @@ Template ConstructTemplate() : { TripleCollectorBGP acc = new TripleCollectorBGP
     { setInConstructTemplate(false) ;
       return t ; }
 }
+#endif
 
 void ConstructTriples(TripleCollector acc) : { }
 {    // Same as TriplesTemplate, but retain for 1.0 legacy
@@ -1102,7 +1170,7 @@ void TriplesSameSubject(TripleCollector acc) : { Node s ; }
 
 void PropertyList(Node s, TripleCollector acc) : { }
 {
-  ( PropertyListNotEmpty(s, acc) ) ?
+  ( /* TriG template: LOOKAHEAD(2) */ PropertyListNotEmpty(s, acc) ) ?
 }
 
 void PropertyListNotEmpty(Node s, TripleCollector acc) : 
@@ -1111,7 +1179,7 @@ void PropertyListNotEmpty(Node s, TripleCollector acc) :
     p = Verb()
     ObjectList(s, p, null, acc)
   ( <SEMICOLON> 
-    (
+    ( /* TriG template: LOOKAHEAD(2) */
        p = Verb()
       ObjectList(s, p, null, acc)
     )? 
@@ -1968,13 +2036,19 @@ Expr Aggregate() : { Aggregator agg = null ; String sep = null ;
     { agg = AggregatorFactory.createGroupConcat(distinct, expr, sep, ordered) ; }
 
 #ifdef ARQ
-    /* Explciit syntax (aggregate even if not registered) */
+    /* Explicit syntax (aggregate even if not registered) */
     | t = <AGG>
           { String iri ; }
-          iri = iri() a = ExpressionList()
-      { agg = AggregatorFactory.createCustom(iri, a) ; }
+          iri = iri()
+          <LPAREN>
+          ( <DISTINCT> { distinct = true ; } )?
+          (
+             expr = Expression() { a.add(expr) ; } 
+             (<COMMA> expr = Expression() { a.add(expr) ; } )*            
+          )?
+          <RPAREN>
+      { agg = AggregatorFactory.createCustom(false, distinct, iri, a) ; }
 #endif
-
    )
 
    {
@@ -2002,7 +2076,7 @@ Expr iriOrFunction() : { String iri ; ExprList a = null ;
          // aggregates
          if ( ! allowAggregatesInExpressions )
             throwParseException("Aggregate expression not legal at this point : "+iri, -1, -1) ;
-         Aggregator agg = AggregatorFactory.createCustom(iri, a) ;
+         Aggregator agg = AggregatorFactory.createCustom(true, false, iri, a) ;
          Expr exprAgg = getQuery().allocAggregate(agg) ;
          return exprAgg ;
       }

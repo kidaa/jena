@@ -19,6 +19,7 @@
 package org.apache.jena.sparql.core.assembler;
 
 import org.apache.jena.assembler.Assembler ;
+import org.apache.jena.assembler.ConstAssembler ;
 import org.apache.jena.assembler.JA ;
 import org.apache.jena.assembler.assemblers.AssemblerGroup ;
 import org.apache.jena.query.* ;
@@ -33,6 +34,7 @@ import org.apache.jena.sparql.util.MappingRegistry ;
 import org.apache.jena.sparql.util.Symbol ;
 import org.apache.jena.sparql.util.TypeNotUniqueException ;
 import org.apache.jena.sparql.util.graph.GraphUtils ;
+import org.apache.jena.system.JenaSystem ;
 
 public class AssemblerUtils
 {
@@ -45,7 +47,7 @@ public class AssemblerUtils
     
     private static boolean initialized = false ; 
     
-    static { ARQ.init(); init() ; } 
+    static { JenaSystem.init() ; } 
     
     static public void init()
     {
@@ -53,7 +55,8 @@ public class AssemblerUtils
             return ;
         initialized = true ;
         // Wire in the extension assemblers (extensions relative to the Jena assembler framework)
-        registerWith(Assembler.general) ;
+        // Do NOT use Assembler.gemneral here (may not be initialized).  
+        registerWith(ConstAssembler.general()) ;
     }
     
     static public void registerWith(AssemblerGroup g)

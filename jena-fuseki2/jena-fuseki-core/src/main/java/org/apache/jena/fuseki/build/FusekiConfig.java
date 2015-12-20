@@ -210,8 +210,8 @@ public class FusekiConfig {
         }
         // Files that are not hidden.
         DirectoryStream.Filter<Path> filter = (entry)-> {
-                File f = entry.toFile() ;
-                return ! f.isHidden() && f.isFile() ;
+            File f = entry.toFile() ;
+            return ! f.isHidden() && f.isFile() ;
         } ;
 
         List<DataAccessPoint> dataServiceRef = new ArrayList<>() ;
@@ -245,6 +245,7 @@ public class FusekiConfig {
         }
 
         Resource service = services.get(0) ;
+        // Configuration file determines read-only status.
         DataAccessPoint acc = Builder.buildDataAccessPoint(service) ; 
         return acc ;
     }

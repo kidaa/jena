@@ -23,8 +23,13 @@ import java.io.InputStream ;
 import java.io.Reader ;
 import java.util.List ;
 import java.util.Map ;
-import java.util.Objects;
 import java.util.Map.Entry;
+import java.util.Objects;
+
+import com.fasterxml.jackson.core.JsonLocation ;
+import com.fasterxml.jackson.core.JsonProcessingException ;
+import com.github.jsonldjava.core.* ;
+import com.github.jsonldjava.utils.JsonUtils ;
 
 import org.apache.jena.atlas.io.IO ;
 import org.apache.jena.atlas.lib.InternalErrorException ;
@@ -41,9 +46,6 @@ import org.apache.jena.riot.system.* ;
 import org.apache.jena.sparql.core.Quad ;
 import org.apache.jena.sparql.util.Context ;
 
-import com.github.jsonldjava.core.* ;
-import com.github.jsonldjava.utils.JsonUtils ;
-
 public class JsonLDReader implements ReaderRIOT
 {
     private ErrorHandler errorHandler = ErrorHandlerFactory.getDefaultErrorHandler() ;
@@ -57,31 +59,45 @@ public class JsonLDReader implements ReaderRIOT
     
     @Override
     public void read(Reader reader, String baseURI, ContentType ct, StreamRDF output, Context context) {
-        if ( parserProfile == null )
-            parserProfile = RiotLib.profile(RDFLanguages.JSONLD, baseURI, errorHandler) ;
         try {
             Object jsonObject = JsonUtils.fromReader(reader) ;
             read$(jsonObject, baseURI, ct, output, context) ;
         }
+        catch (JsonProcessingException ex) {    
+            // includes JsonParseException
+            // The Jackson JSON parser, or addition JSON-level check, throws up something.
+            JsonLocation loc = ex.getLocation() ;
+            errorHandler.error(ex.getOriginalMessage(), loc.getLineNr(), loc.getColumnNr()); 
+            throw new RiotException(ex.getOriginalMessage()) ;
+        }
         catch (IOException e) {
+            errorHandler.error(e.getMessage(), -1, -1); 
             IO.exception(e) ;
         }
     }
 
     @Override
     public void read(InputStream in, String baseURI, ContentType ct, StreamRDF output, Context context) {
-        if ( parserProfile == null )
-            parserProfile = RiotLib.profile(RDFLanguages.JSONLD, baseURI, errorHandler) ;
         try {
             Object jsonObject = JsonUtils.fromInputStream(in) ;
             read$(jsonObject, baseURI, ct, output, context) ;
         }
+        catch (JsonProcessingException ex) {    
+            // includes JsonParseException
+            // The Jackson JSON parser, or addition JSON-level check, throws up something.
+            JsonLocation loc = ex.getLocation() ;
+            errorHandler.error(ex.getOriginalMessage(), loc.getLineNr(), loc.getColumnNr()); 
+            throw new RiotException(ex.getOriginalMessage()) ;
+        }
         catch (IOException e) {
+            errorHandler.error(e.getMessage(), -1, -1); 
             IO.exception(e) ;
         }
     }
     
     private void read$(Object jsonObject, String baseURI, ContentType ct, final StreamRDF output, Context context) {
+        if ( parserProfile == null )
+            parserProfile = RiotLib.profile(RDFLanguages.JSONLD, baseURI, errorHandler) ;
         output.start() ;
         try {       	
             JsonLdTripleCallback callback = new JsonLdTripleCallback() {
@@ -186,5 +202,4 @@ public class JsonLDReader implements ReaderRIOT
         RDFDatatype dt = NodeFactory.getType(datatype) ;
         return NodeFactory.createLiteral(lex, dt) ;
     }
-
 }

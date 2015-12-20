@@ -48,11 +48,12 @@ import org.apache.jena.riot.tokens.Tokenizer ;
 import org.apache.jena.riot.tokens.TokenizerFactory ;
 import org.apache.jena.sparql.core.DatasetGraph ;
 import org.apache.jena.sparql.core.DatasetGraphFactory ;
+import org.apache.jena.system.JenaSystem ;
 
 /** Common framework for running RIOT parsers */
 public abstract class CmdLangParse extends CmdGeneral
 {
-    static { RIOT.init(); }
+    static { JenaSystem.init(); }
     protected ModTime modTime                   = new ModTime() ;
     protected ModLangParse modLangParse         = new ModLangParse() ;
     protected ModLangOutput modLangOutput       = new ModLangOutput() ;
@@ -125,8 +126,14 @@ public abstract class CmdLangParse extends CmdGeneral
     
     @Override
     protected void exec() {
+        boolean oldStrictValue = SysRIOT.isStrictMode() ;
         if ( modLangParse.strictMode() )
-            RIOT.setStrictMode(true) ; 
+            SysRIOT.setStrictMode(true) ;
+        try { exec$() ; }
+        finally { SysRIOT.setStrictMode(oldStrictValue) ; } 
+    }
+    
+    protected void exec$() {
         
         if ( modLangParse.getRDFSVocab() != null )
             setup = new InferenceSetupRDFS(modLangParse.getRDFSVocab()) ;
@@ -308,7 +315,7 @@ public abstract class CmdLangParse extends CmdGeneral
     
     /** Create an accumulating output stream for later pretty printing */
     protected Pair<StreamRDF, PostParseHandler> createAccumulateSink() {
-        final DatasetGraph dsg = DatasetGraphFactory.createMem() ;
+        final DatasetGraph dsg = DatasetGraphFactory.create() ;
         StreamRDF sink = StreamRDFLib.dataset(dsg) ;
         final RDFFormat fmt = modLangOutput.getOutputFormatted() ;
         PostParseHandler handler = new PostParseHandler() {
@@ -317,7 +324,7 @@ public abstract class CmdLangParse extends CmdGeneral
                 // Try as dataset, then as graph.
                 WriterDatasetRIOTFactory w = RDFWriterRegistry.getWriterDatasetFactory(fmt) ;
                 if ( w != null ) {
-                    RDFDataMgr.write(output, dsg.getDefaultGraph(), fmt) ;
+                    RDFDataMgr.write(output, dsg, fmt) ;
                     return ;
                 }
                 WriterGraphRIOTFactory wg = RDFWriterRegistry.getWriterGraphFactory(fmt) ;

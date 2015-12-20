@@ -18,9 +18,8 @@
 
 package org.apache.jena.riot;
 
-import java.io.File ;
-
 import org.apache.jena.atlas.lib.IRILib ;
+import org.apache.jena.base.Sys ;
 import org.apache.jena.riot.system.IRIResolver ;
 import org.apache.jena.util.FileUtils ;
 import org.slf4j.Logger ;
@@ -31,13 +30,28 @@ public class SysRIOT
     public static final String riotLoggerName = "org.apache.jena.riot" ;
     private static Logger riotLogger = LoggerFactory.getLogger(riotLoggerName) ;
     
-    public static boolean StrictXSDLexicialForms = false ;
-    public static boolean strictMode             = false ;
+    public static boolean StrictXSDLexicialForms      = false ;
+    public static boolean StrictAbsURINoNormalization = false ;
+    public static boolean strictMode                  = false ;
     
-    public static final String BNodeGenIdPrefix = "genid" ;
+    public static final String BNodeGenIdPrefix     = "genid" ;
     
-    public static final boolean isWindows = (File.pathSeparatorChar == ';' ) ;
+    /**
+     * @deprecated Use Sys.isWindows
+     */
+    @Deprecated
+    public static final boolean isWindows = Sys.isWindows ;
     
+    public static void setStrictMode(boolean state) {
+        SysRIOT.strictMode = state ;
+        SysRIOT.StrictXSDLexicialForms = state ;
+        SysRIOT.StrictAbsURINoNormalization = state ;
+    }
+
+    public static boolean isStrictMode() {
+        return SysRIOT.strictMode ;
+    }
+
     static public String fmtMessage(String message, long line, long col)
     {
         if ( col == -1 && line == -1 )

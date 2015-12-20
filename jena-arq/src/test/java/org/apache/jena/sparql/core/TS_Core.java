@@ -26,13 +26,17 @@ import org.junit.runners.Suite ;
     TestContext.class
     , TestDatasetGraphMem.class
     , TestDatasetGraphMemTriplesQuads.class
-    , TestDatasetMem.class
+    , TestDatasetGeneral.class
     // Not ready , TestDynamicDatasetMem.class
     , TestDatasetGraphsRegular.class
+    , TestDatasetGraphCopyAdd.class
     , TestGraphOverDatasetMem.class
     , TestDatasetGraphViewGraphs.class
     , TestDatasetMonitor.class
     , TestDatasetGraphWithLock.class
+    
+    , TestDatasetGraphBaseFind_General.class
+    , TestDatasetGraphBaseFindPattern_General.class
 })
 
 public class TS_Core

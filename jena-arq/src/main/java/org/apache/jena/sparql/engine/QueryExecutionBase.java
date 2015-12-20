@@ -18,35 +18,37 @@
 
 package org.apache.jena.sparql.engine;
 
-import java.util.HashSet ;
-import java.util.Iterator ;
-import java.util.List ;
-import java.util.Set ;
-import java.util.concurrent.TimeUnit ;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
-import org.apache.jena.atlas.lib.AlarmClock ;
-import org.apache.jena.atlas.logging.Log ;
-import org.apache.jena.graph.Node ;
-import org.apache.jena.graph.Triple ;
+import org.apache.jena.atlas.lib.Alarm ;
+import org.apache.jena.atlas.lib.AlarmClock;
+import org.apache.jena.atlas.logging.Log;
+import org.apache.jena.graph.Node;
+import org.apache.jena.graph.Triple;
 import org.apache.jena.query.* ;
 import org.apache.jena.rdf.model.* ;
-import org.apache.jena.riot.system.IRIResolver ;
-import org.apache.jena.shared.PrefixMapping ;
-import org.apache.jena.sparql.ARQConstants ;
-import org.apache.jena.sparql.core.DatasetGraph ;
-import org.apache.jena.sparql.core.describe.DescribeHandler ;
-import org.apache.jena.sparql.core.describe.DescribeHandlerRegistry ;
-import org.apache.jena.sparql.engine.binding.Binding ;
-import org.apache.jena.sparql.engine.binding.BindingRoot ;
-import org.apache.jena.sparql.engine.binding.BindingUtils ;
-import org.apache.jena.sparql.engine.iterator.QueryIteratorWrapper ;
-import org.apache.jena.sparql.graph.GraphFactory ;
-import org.apache.jena.sparql.modify.TemplateLib ;
-import org.apache.jena.sparql.syntax.ElementGroup ;
-import org.apache.jena.sparql.syntax.Template ;
-import org.apache.jena.sparql.util.Context ;
-import org.apache.jena.sparql.util.DatasetUtils ;
-import org.apache.jena.sparql.util.ModelUtils ;
+import org.apache.jena.riot.system.IRIResolver;
+import org.apache.jena.shared.PrefixMapping;
+import org.apache.jena.sparql.ARQConstants;
+import org.apache.jena.sparql.core.DatasetGraph;
+import org.apache.jena.sparql.core.Quad;
+import org.apache.jena.sparql.core.describe.DescribeHandler;
+import org.apache.jena.sparql.core.describe.DescribeHandlerRegistry;
+import org.apache.jena.sparql.engine.binding.Binding;
+import org.apache.jena.sparql.engine.binding.BindingRoot;
+import org.apache.jena.sparql.engine.binding.BindingUtils;
+import org.apache.jena.sparql.engine.iterator.QueryIteratorWrapper;
+import org.apache.jena.sparql.graph.GraphFactory;
+import org.apache.jena.sparql.modify.TemplateLib;
+import org.apache.jena.sparql.syntax.ElementGroup;
+import org.apache.jena.sparql.syntax.Template;
+import org.apache.jena.sparql.util.Context;
+import org.apache.jena.sparql.util.DatasetUtils;
+import org.apache.jena.sparql.util.ModelUtils;
 
 /** All the SPARQL query result forms made from a graph-level execution object */ 
 
@@ -56,20 +58,20 @@ public class QueryExecutionBase implements QueryExecution
     // Initial bindings.
     // Split : QueryExecutionGraph already has the dataset.
 
-    private Query               query ;
-    private Dataset             dataset ;
-    private QueryEngineFactory  qeFactory ;
-    private QueryIterator       queryIterator = null ;
-    private Plan                plan = null ;
-    private Context             context ;
-    private QuerySolution       initialBinding = null ; 
-    
-    // Set if QueryIterator.cancel has been called 
-    private volatile boolean    isCancelled = false ;
-    private boolean closed ;
-    private volatile TimeoutCallback expectedCallback = null ;    
-    private TimeoutCallback timeout1Callback = null ;
-    private TimeoutCallback timeout2Callback = null ;
+    private Query                    query;
+    private Dataset                  dataset;
+    private QueryEngineFactory       qeFactory;
+    private QueryIterator            queryIterator    = null;
+    private Plan                     plan             = null;
+    private Context                  context;
+    private QuerySolution            initialBinding   = null;
+
+    // Set if QueryIterator.cancel has been called
+    private volatile boolean         isCancelled      = false;
+    private boolean                  closed;
+    private volatile TimeoutCallback expectedCallback = null;
+    private Alarm                    timeout1Alarm    = null;
+    private Alarm                    timeout2Alarm    = null;
     
     private final Object        lockTimeout = new Object() ;     // synchronization.  
     private static final long   TIMEOUT_UNSET = -1 ;
@@ -141,10 +143,10 @@ public class QueryExecutionBase implements QueryExecution
             queryIterator.close() ;
         if ( plan != null )
             plan.close() ;
-        if ( timeout1Callback != null )
-            alarmClock.cancel(timeout1Callback) ;
-        if ( timeout2Callback != null )
-            alarmClock.cancel(timeout2Callback) ;
+        if ( timeout1Alarm != null )
+            alarmClock.cancel(timeout1Alarm) ;
+        if ( timeout2Alarm != null )
+            alarmClock.cancel(timeout2Alarm) ;
     }
 
     @Override
@@ -242,11 +244,42 @@ public class QueryExecutionBase implements QueryExecution
         Template template = query.getConstructTemplate() ;
         return TemplateLib.calcTriples(template.getTriples(), queryIterator);
     }
+    
+    @Override
+    public Iterator<Quad> execConstructQuads()
+    {
+        checkNotClosed() ;
+        if ( ! query.isConstructType() )
+            throw new QueryExecException("Attempt to get a CONSTRUCT model from a "+labelForQuery(query)+" query") ;
+        // This causes there to be no PROJECT around the pattern.
+        // That in turn, exposes the initial bindings.  
+        query.setQueryResultStar(true) ;
+
+        startQueryIterator() ;
+        
+        Template template = query.getConstructTemplate() ;
+        return TemplateLib.calcQuads(template.getQuads(), queryIterator);
+    }
+    
+    @Override
+    public Dataset execConstructDataset(){
+        return execConstructDataset(DatasetFactory.createTxnMem()) ;
+    }
+
+    @Override
+    public Dataset execConstructDataset(Dataset dataset){
+        DatasetGraph dsg = dataset.asDatasetGraph() ; 
+        try {
+            execConstructQuads().forEachRemaining(dsg::add);
+        } finally {
+            this.close();
+        }
+        return dataset ; 
+    }
 
     @Override
     public Model execDescribe()
     { return execDescribe(GraphFactory.makeJenaDefaultModel()) ; }
-
 
     @Override
     public Model execDescribe(Model model)
@@ -429,8 +462,9 @@ public class QueryExecutionBase implements QueryExecution
                 // So nearly not needed.
                 synchronized(lockTimeout)
                 {
-                    expectedCallback = timeout2Callback ;
-                    // Lock against calls of .abort() nor of timeout1Callback. 
+                    TimeoutCallback callback = new TimeoutCallback() ;
+                    expectedCallback = callback ;
+                    // Lock against calls of .abort() or of timeout1Callback. 
                     
                     // Update/check the volatiles in a careful order.
                     // This cause timeout1 not to call .abort and hence not set isCancelled 
@@ -441,14 +475,16 @@ public class QueryExecutionBase implements QueryExecution
                         // timeout1 went off after the binding was yielded but 
                         // before we got here.
                         throw new QueryCancelledException() ;
-                    if ( timeout1Callback != null )
-                        alarmClock.cancel(timeout1Callback) ;
-                        timeout1Callback = null ;
+                    if ( timeout1Alarm != null ) {
+                        alarmClock.cancel(timeout1Alarm) ;
+                        timeout1Alarm = null ;
+                    }
 
                     // Now arm the second timeout, if any.
-                    if ( timeout2 > 0 )
+                    if ( timeout2 > 0 ) {
                         // Not first timeout - finite second timeout. 
-                        alarmClock.add(timeout2Callback, timeout2) ;
+                        timeout2Alarm = alarmClock.add(callback, timeout2) ;
+                    }
                     resetDone = true ;
                 }
             }
@@ -494,9 +530,9 @@ public class QueryExecutionBase implements QueryExecution
         if ( ! isTimeoutSet(timeout1) && isTimeoutSet(timeout2) )
         {
             // Single overall timeout.
-            timeout2Callback = new TimeoutCallback() ; 
-            expectedCallback = timeout2Callback ; 
-            alarmClock.add(timeout2Callback, timeout2) ;
+            TimeoutCallback callback = new TimeoutCallback() ; 
+            expectedCallback = callback ; 
+            timeout2Alarm = alarmClock.add(callback, timeout2) ;
             // Start the query.
             queryIterator = getPlan().iterator() ;
             // But don't add resetter.
@@ -504,19 +540,19 @@ public class QueryExecutionBase implements QueryExecution
         }
 
         // Case isTimeoutSet(timeout1)
+        //   Whether timeout2 is set is determined by QueryIteratorTimer2
+        //   Subcase 2: ! isTimeoutSet(timeout2)
         // Add timeout to first row.
-        timeout1Callback = new TimeoutCallback() ; 
-        alarmClock.add(timeout1Callback, timeout1) ;
-        expectedCallback = timeout1Callback ;
+        TimeoutCallback callback = new TimeoutCallback() ; 
+        timeout1Alarm = alarmClock.add(callback, timeout1) ;
+        expectedCallback = callback ;
 
         // We don't know if getPlan().iterator() does a lot of work or not
         // (ideally it shouldn't start executing the query but in some sub-systems 
         // it might be necessary)
         queryIterator = getPlan().iterator() ;
         
-        // Add the timeout resetter wrapper.
-        timeout2Callback = new TimeoutCallback() ; 
-        // Wrap with a resetter.
+        // Add the timeout1 resetter wrapper.
         queryIterator = new QueryIteratorTimer2(queryIterator) ;
 
         // Minor optimization - the first call of hasNext() or next() will

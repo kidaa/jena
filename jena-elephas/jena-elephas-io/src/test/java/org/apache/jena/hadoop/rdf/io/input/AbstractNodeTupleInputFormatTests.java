@@ -399,7 +399,14 @@ public abstract class AbstractNodeTupleInputFormatTests<TValue, T extends Abstra
      */
     @Test
     public final void single_input_05() throws IOException, InterruptedException {
-        testSingleInput(mixed, 1, MIXED_SIZE / 2);
+        // JSON-LD overrides this because in JSON-LD parsing a bad document gives no triples. 
+        int x = single_input_05_expected() ;
+        testSingleInput(mixed, 1, x);
+    }
+
+    /** Results exected for test single_input_05 */ 
+    protected int single_input_05_expected() {
+        return MIXED_SIZE / 2 ;
     }
 
     /**
@@ -424,8 +431,6 @@ public abstract class AbstractNodeTupleInputFormatTests<TValue, T extends Abstra
      */
     @Test(expected = IOException.class)
     public final void fail_on_bad_input_02() throws IOException, InterruptedException {
-        Assume.assumeFalse("fail_on_bad_input_02: See JENA-1013 (JSON-LD tests)", this.getFileExtension().contains("jsonld")) ;
-        
         Configuration config = this.prepareConfiguration();
         config.setBoolean(RdfIOConstants.INPUT_IGNORE_BAD_TUPLES, false);
         Assert.assertFalse(config.getBoolean(RdfIOConstants.INPUT_IGNORE_BAD_TUPLES, true));
@@ -496,8 +501,16 @@ public abstract class AbstractNodeTupleInputFormatTests<TValue, T extends Abstra
      */
     @Test
     public final void multiple_inputs_02() throws IOException, InterruptedException {
-        testMultipleInputs(new File[] { folder.getRoot() }, this.canSplitInputs() ? 4 : 5, EMPTY_SIZE + SMALL_SIZE
-                + LARGE_SIZE + (MIXED_SIZE / 2));
+        int expectedTriples = multiple_inputs_02_expected() ; 
+        testMultipleInputs(new File[] { folder.getRoot() }, this.canSplitInputs() ? 4 : 5, expectedTriples);
+    }
+
+    /** Results exected for test multiple_inputs_02.
+     * JSON_LD has different characteristics on bad documents.
+     * See {@link #single_input_05}.
+     */ 
+    protected int multiple_inputs_02_expected() {
+        return EMPTY_SIZE + SMALL_SIZE + LARGE_SIZE + (MIXED_SIZE / 2) ;
     }
 
     protected final void testSplitInputs(Configuration config, File[] inputs, int expectedSplits, int expectedTuples)
